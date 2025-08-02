@@ -1,4 +1,8 @@
-[{<<"gproc">>,
+[{<<"esockd">>,
+  {git,"https://github.com/emqx/esockd.git",
+       {ref,"d0c3edcce18a03beab654eb2654d51335bfd7550"}},
+  0},
+ {<<"gproc">>,
   {git,"https://github.com/uwiger/gproc.git",
        {ref,"af7a1f5486c92ad34a07ddb3c4a1e9a9707763b6"}},
   0}].

@@ -2,6 +2,7 @@
 
 -export([
     start_host/3,
+    start_dtls_host/3,
     stop_host/1,
     connect_peer/4,
     connect_peer/5,
@@ -40,9 +41,33 @@ start_host(Port, ConnectFun, Options) ->
             {error, Reason};
         {ok, _HostSup} ->
             Host = gproc:where({n, l, {enet_host, AssignedPort}}),
-            enet_host:give_socket(Host, Socket),
+            %%enet_host:give_socket(Host, Socket),
             {ok, AssignedPort}
     end.
+
+-spec start_dtls_host(
+    Port :: port_number(),
+    ConnectFun ::
+        mfargs()
+        | fun((map()) -> {ok, pid()} | {error, term()}),
+    Options :: [{atom(), term()}, ...]
+) ->
+    {ok, port_number()} | {error, term()}.
+
+start_dtls_host(Port, ConnectFun, Options) ->
+    %%{ok, Socket} = gen_udp:open(Port, enet_host:socket_options()),
+    %%{ok, AssignedPort} = inet:port(Socket),
+    case enet_sup:start_host_dtls_supervisor(Port, ConnectFun, Options) of
+        {error, Reason} ->
+            io:format("Startup dtls failure ~p~n", [Reason]),
+            {error, Reason};
+        {ok, _HostSup} ->        
+            io:format("Startup dtls success"),
+            %%Host = gproc:where({n, l, {enet_host, AssignedPort}}),
+            %%%enet_host:give_socket(Host, Socket),
+            {ok, Port}
+    end.
+
 
 -spec stop_host(HostPort :: port_number()) -> ok.
 
@@ -59,8 +84,9 @@ stop_host(HostPort) ->
     {ok, pid()} | {error, atom()}.
 
 connect_peer(HostPort, IP, RemotePort, ChannelCount, Data) ->
-    Host = gproc:where({n, l, {enet_host, HostPort}}),
-    enet_host:connect(Host, IP, RemotePort, ChannelCount, Data).
+    %%Host = gproc:where({n, l, {enet_host, HostPort}}),
+    {ok, Host} = dtls_echo_conn_sup:start_child_connect(HostPort, IP, RemotePort, ChannelCount, Data).
+    %enet_host:connect(Host, IP, RemotePort, ChannelCount, Data).
 
 -spec connect_peer(
           HostPort     :: port_number(),

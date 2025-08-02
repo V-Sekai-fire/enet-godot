@@ -9,7 +9,7 @@
 -export([
     start_link/3,
     socket_options/0,
-    give_socket/2,
+    give_socket/3,
     connect/5,
     send_outgoing_commands/4,
     send_outgoing_commands/5,
@@ -31,6 +31,8 @@
 ]).
 
 -record(state, {
+    transport,
+    peername,
     socket,
     compressor,
     connect_fun
@@ -48,18 +50,30 @@ start_link(Port, ConnectFun, Options) ->
 socket_options() ->
     [binary, {active, false}, {reuseaddr, false}, {broadcast, true}].
 
-give_socket(Host, Socket) ->
-    ok = gen_udp:controlling_process(Socket, Host),
-    gen_server:cast(Host, {give_socket, Socket}).
+give_socket(Host, Socket, Transport) ->
+    case Transport:controlling_process(Socket, Host) of
+        ok ->
+            io:format("Process transferred 1~n"),
+            gen_server:cast(Host, {give_socket, Socket, Transport}),
+            {ok, Host};
+        {error, Reason} ->
+            io:format("Failed to transfer process: ~p~n", [Reason]),
+            {error, Reason}
+    end.
+
+    %%ok = Transport:controlling_process(Socket, Host),
+    %%io:format("Process transferred 1"),
+    %%ok = gen_udp:controlling_process(Socket, Host),
+    %%gen_server:cast(Host, {give_socket, Socket, Transport}).
 
 connect(Host, IP, Port, ChannelCount, Data) ->
-    gen_server:call(Host, {connect, IP, Port, ChannelCount, Data}).
+    gen_statem:call(Host, {connect, IP, Port, ChannelCount, Data}).
 
 send_outgoing_commands(Host, Commands, IP, Port) ->
     send_outgoing_commands(Host, Commands, IP, Port, ?NULL_PEER_ID).
 
 send_outgoing_commands(Host, Commands, IP, Port, PeerID) ->
-    gen_server:call(
+    gen_statem:call(
         Host, {send_outgoing_commands, Commands, IP, Port, PeerID}
     ).
 
@@ -84,6 +98,8 @@ get_channel_limit(Host) ->
 
 init({AssignedPort, ConnectFun, Options}) ->
     true = gproc:reg({n, l, {enet_host, AssignedPort}}),
+    yes = global:register_name({enet_host, AssignedPort}, self()),
+    %%io:format("Global proc reg ~p~n", Options),
     ChannelLimit =
         case lists:keyfind(channel_limit, 1, Options) of
             {channel_limit, CLimit} -> CLimit;
@@ -115,24 +131,13 @@ init({AssignedPort, ConnectFun, Options}) ->
             {mtu, ?HOST_DEFAULT_MTU}
         ]
     ),
-    case gen_udp:open(AssignedPort, socket_options()) of
-        {error, eaddrinuse} ->
-            %%
-            %% A socket has already been opened on this port
-            %% - The socket will be given to us later
-            %%
-            {ok, #state{connect_fun = ConnectFun, compressor = Compressor}};
-        {ok, Socket} ->
-            %%
-            %% We were able to open a new socket on this port
-            %% - It means we have been restarted by the supervisor
-            %% - Set it to active mode
-            %%
-            ok = inet:setopts(Socket, [{active, true}]),
-            {ok, #state{connect_fun = ConnectFun, 
-                        compressor = Compressor,
-                        socket = Socket}}
-    end.
+    %%TODO: Evaluate restart behaviour
+    %%ok = inet:setopts(Socket, [{active, true}]),
+    {ok, #state{connect_fun = ConnectFun, 
+                compressor = Compressor,
+                transport = undefined,
+                peername = undefined,
+                socket = undefined}}.
 
 handle_call({connect, IP, Port, Channels, Data}, _From, S) ->
     %%
@@ -142,6 +147,7 @@ handle_call({connect, IP, Port, Channels, Data}, _From, S) ->
     %% - Start the peer process
     %%
     #state{
+        socket = Socket,
         connect_fun = ConnectFun
     } = S,
     Ref = make_ref(),
@@ -166,6 +172,7 @@ handle_call({connect, IP, Port, Channels, Data}, _From, S) ->
             error:exists -> {error, exists}
         end,
     {reply, Reply, S};
+
 handle_call({send_outgoing_commands, C, IP, Port, ID}, _From, S) ->
     %%
     %% Received outgoing commands from a peer.
@@ -199,9 +206,12 @@ handle_call({send_outgoing_commands, C, IP, Port, ID}, _From, S) ->
 %%% handle_cast
 %%%
 
-handle_cast({give_socket, Socket}, S) ->
-    ok = inet:setopts(Socket, [{active, true}]),
-    {noreply, S#state{socket = Socket}};
+handle_cast({give_socket, Socket, Transport}, S) ->
+    ok = Transport:setopts(Socket, [{active, true}]),
+    {ok, PeerName} = Transport:peername(Socket),
+    io:format("Process transferred 2"),
+    %%ok = inet:setopts(Socket, [{active, true}]),
+    {noreply, S#state{socket = Socket, transport = Transport, peername = PeerName}};
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
@@ -209,7 +219,70 @@ handle_cast(_Msg, State) ->
 %%% handle_info
 %%%
 
+%%% Handle all DTLS/SSL messages
+handle_info({ssl, _Raw, Packet}, State = #state{transport=T, socket=S, peername=P}) ->
+    io:format("Inside host sup~n"),
+    %%io:format("Inside host ~p~n", [Packet]),
+    io:format("~s ← ~p~n", [esockd:format(P), Packet]),
+    T:async_send(S, Packet),
+    {noreply, State};
+
+handle_info({ssl_passive, _Raw}, State = #state{transport=T, socket=S, peername=P}) ->
+    io:format("~s → passive~n", [esockd:format(P)]),
+    T:setopts(S, [{active, 100}]),
+    {noreply, State};
+
+handle_info({inet_reply, _Raw, ok}, State) ->
+    {noreply, State};
+
+handle_info({ssl_closed, _Raw}, State) ->
+    {stop, normal, State};
+
+handle_info({ssl_error, _Raw, Reason}, State = #state{peername=P}) ->
+    io:format("~s error: ~p~n", [esockd:format(P), Reason]),
+    {stop, Reason, State};
+
+%%
+%% Handle UDP
+%%
+
 handle_info({udp, Socket, IP, Port, Packet}, S) ->
+    demux_packet(Socket, IP, Port, Packet, S),
+    {noreply, S};
+
+handle_info({gproc, unreg, _Ref, {n, l, {enet_peer, Ref}}}, S) ->
+    %%
+    %% A Peer process has exited.
+    %%
+    %% - Remove it from the pool
+    %%
+    #state{
+        socket = Socket
+    } = S,
+    LocalPort = get_port(self()),
+    true = enet_pool:remove_peer(LocalPort, Ref),
+    {noreply, S}.
+
+%%%
+%%% terminate
+%%%
+
+terminate(Reason, S) ->
+    io:format("terminatin ~p~n",[Reason]).
+    %%ok = gen_udp:close(S#state.socket).
+
+%%%
+%%% code_change
+%%%
+
+code_change(_OldVsn, State, _Extra) ->
+    {ok, State}.
+
+%%%===================================================================
+%%% Internal functions
+%%%===================================================================
+
+demux_packet(Socket, IP, Port, Packet, S) ->
     %%
     %% Received a UDP packet.
     %%
@@ -261,40 +334,14 @@ handle_info({udp, Socket, IP, Port, Packet}, S) ->
         PeerID ->
             case enet_pool:pick_peer(LocalPort, PeerID) of
                 %% Unknown peer - drop the packet
+                %% In SSL, will drop packet if socket and packet peerid
+                %% don't match
                 false ->
                     ok;
                 Pid ->
                     enet_peer:recv_incoming_packet(Pid, IP, SentTime, Commands)
             end
-    end,
-    {noreply, S};
-handle_info({gproc, unreg, _Ref, {n, l, {enet_peer, Ref}}}, S) ->
-    %%
-    %% A Peer process has exited.
-    %%
-    %% - Remove it from the pool
-    %%
-    LocalPort = get_port(self()),
-    true = enet_pool:remove_peer(LocalPort, Ref),
-    {noreply, S}.
-
-%%%
-%%% terminate
-%%%
-
-terminate(_Reason, S) ->
-    ok = gen_udp:close(S#state.socket).
-
-%%%
-%%% code_change
-%%%
-
-code_change(_OldVsn, State, _Extra) ->
-    {ok, State}.
-
-%%%===================================================================
-%%% Internal functions
-%%%===================================================================
+    end.
 
 get_time() ->
     erlang:system_time(1000) band 16#FFFF.

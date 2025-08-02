@@ -7,7 +7,9 @@
                   kernel,
                   stdlib,
                   crypto,
-                  gproc
+                  gproc,
+                  esockd,
+                  ssl
                  ]},
   {mod, {enet_app, []}},
   {env, []}
