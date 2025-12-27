@@ -245,8 +245,7 @@ connecting(enter, _OldState, S) ->
     %% Sending the initial Connect command.
     %%
     #state{
-        host = Host,      
-        manager_name = ManagerName,
+        host = Host,
         manager_pid = ManagerPid,
         channel_count = ChannelCount,
         ip = IP,
@@ -285,9 +284,26 @@ connecting(enter, _OldState, S) ->
     CBin = enet_protocol_encode:command(ConnectC),
     Data = [HBin, CBin],
     io:format("ENet Peer: Sending CONNECT command to ~p:~p via ManagerPid ~p~n", [IP, Port, ManagerPid]),
-    {sent_time, SentTime} =
-        send_outgoing_commands(ManagerPid, Data, IP, Port),
-    io:format("ENet Peer: CONNECT command sent, SentTime=~p~n", [SentTime]),
+    SentTime = case send_outgoing_commands(ManagerPid, Data, IP, Port) of
+        {sent_time, ST} ->
+            io:format("ENet Peer: CONNECT command sent, SentTime=~p~n", [ST]),
+            ST;
+        {error, handshake_in_progress} ->
+            %% DTLS handshake not complete yet - wait and retry
+            io:format("ENet Peer: DTLS handshake in progress, waiting...~n"),
+            timer:sleep(200),
+            case send_outgoing_commands(ManagerPid, Data, IP, Port) of
+                {sent_time, RetryST} ->
+                    io:format("ENet Peer: CONNECT command sent on retry, SentTime=~p~n", [RetryST]),
+                    RetryST;
+                RetryError ->
+                    io:format("ENet Peer: Retry failed: ~p, using fallback time~n", [RetryError]),
+                    erlang:system_time(millisecond)  %% Fallback to current time
+            end;
+        {error, Reason} ->
+            io:format("ENet Peer: Failed to send CONNECT command: ~p, using fallback time~n", [Reason]),
+            erlang:system_time(millisecond)  %% Fallback to current time
+    end,
     ChannelID = 16#FF,
     ConnectTimeout =
         make_resend_timer(
@@ -363,7 +379,6 @@ acknowledging_connect(cast, {incoming_command, {_H, C = #connect{}}}, S) ->
     } = C,
     #state{
         host = Host,
-        manager_name = ManagerName,
         manager_pid = ManagerPid,
         ip = IP,
         port = Port,
@@ -440,10 +455,10 @@ acknowledging_verify_connect(
         incoming_session_id = _IncomingSessionID,
         outgoing_session_id = _OutgoingSessionID,
         mtu = RemoteMTU,
-        window_size = WindowSize,
+        window_size = _WindowSize,
         channel_count = RemoteChannelCount,
-        incoming_bandwidth = IncomingBandwidth,
-        outgoing_bandwidth = OutgoingBandwidth,
+        incoming_bandwidth = _IncomingBandwidth,
+        outgoing_bandwidth = _OutgoingBandwidth,
         packet_throttle_interval = ThrottleInterval,
         packet_throttle_acceleration = ThrottleAcceleration,
         packet_throttle_deceleration = ThrottleDeceleration,
@@ -688,8 +703,6 @@ connected(cast, {outgoing_command, {H, C = #unsequenced{}}}, S) ->
     %% - Reset the send-timer
     %%
     #state{
-        host = Host,
-        manager_name = ManagerName,
         manager_pid = ManagerPid,
         ip = IP,
         port = Port,
@@ -713,8 +726,6 @@ connected(cast, {outgoing_command, {H, C = #unreliable{}}}, S) ->
     %% - Reset the send-timer
     %%
     #state{
-        host = Host,
-        manager_name = ManagerName,
         manager_pid = ManagerPid,
         ip = IP,
         port = Port,
@@ -735,8 +746,6 @@ connected(cast, {outgoing_command, {H, C = #reliable{}}}, S) ->
     %% - Reset the send-timer
     %%
     #state{
-        host = Host,
-        manager_name = ManagerName,
         manager_pid = ManagerPid,
         ip = IP,
         port = Port,
@@ -765,12 +774,13 @@ connected(info, {enet, ChannelID, C}, S) ->
     %% we receive it here as an :info event and forward to the worker.
     %%
     #state{worker = Worker} = S,
-    case Worker of
-        self() ->
+    case Worker == self() of
+        true ->
             % Worker is the peer itself - this shouldn't happen but handle gracefully
-            logger:warning("Peer received {enet, ChannelID, C} but worker is self() - dropping"),
+            % Log warning (using io:format since logger might not be available)
+            io:format("Warning: Peer received {enet, ChannelID, C} but worker is self() - dropping~n"),
             {keep_state, S};
-        _ ->
+        false ->
             % Forward to worker (typically the peer_loop process spawned by connect_fun)
             Worker ! {enet, ChannelID, C},
             {keep_state, S}
@@ -783,8 +793,6 @@ connected(cast, disconnect, State) ->
     %% - Change state to 'disconnecting'
     %%
     #state{
-        host = Host,
-        manager_name = ManagerName,
         manager_pid = ManagerPid,
         ip = IP,
         port = Port,
@@ -813,8 +821,6 @@ connected({timeout, {ChannelID, SentTime, SequenceNr}}, Data, S) ->
     %% - Reset the send-timer
     %%
     #state{
-        host = Host,
-        manager_name = ManagerName,
         manager_pid = ManagerPid,
         ip = IP,
         port = Port,
@@ -849,8 +855,6 @@ connected({timeout, send}, ping, S) ->
     %% - Reset the send-timer
     %%
     #state{
-        host = Host,
-        manager_name = ManagerName,
         manager_pid = ManagerPid,
         ip = IP,
         port = Port,
@@ -934,7 +938,7 @@ handle_event(cast, {incoming_packet, FromIP, SentTime, Packet}, S) ->
     %% - Split and decode the commands from the binary
     %% - Send the commands as individual events to ourselves
     %%
-    #state{host = Host, port = Port, manager_name = ManagerName, manager_pid = ManagerPid} = S,
+      #state{port = Port, manager_pid = ManagerPid} = S,
     {ok, Commands} = enet_protocol_decode:commands(Packet),
     lists:foreach(
         fun

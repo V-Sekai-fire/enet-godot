@@ -54,7 +54,7 @@ init({Port, HostId}) ->
             case esockd:open_dtls(EsockdName, Port, Opts, MFArgs) of
                 {ok, _ListenSock} ->
                     {ok, #state{port=Port, esockd_name=EsockdName}};
-                {error, {{shutdown, {failed_to_start_child, _Listener, already_listening}}, _}} = Error ->
+                {error, {{shutdown, {failed_to_start_child, _Listener, already_listening}}, _}} = _Error ->
                     %% Listener already exists - this is OK if it's the same one
                     %% Try to verify it's our listener by checking if we can get info about it
                     %% For now, just accept it and continue

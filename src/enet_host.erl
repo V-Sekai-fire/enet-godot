@@ -147,7 +147,6 @@ handle_call({connect, IP, Port, Channels, Data}, _From, S) ->
     %% - Start the peer process
     %%
     #state{
-        socket = Socket,
         connect_fun = ConnectFun
     } = S,
     Ref = make_ref(),
@@ -304,9 +303,6 @@ handle_info({gproc, unreg, _Ref, {n, l, {enet_peer, Ref}}}, S) ->
     %%
     %% - Remove it from the pool
     %%
-    #state{
-        socket = Socket
-    } = S,
     LocalPort = get_port(self()),
     true = enet_pool:remove_peer(LocalPort, Ref),
     {noreply, S}.
@@ -315,7 +311,7 @@ handle_info({gproc, unreg, _Ref, {n, l, {enet_peer, Ref}}}, S) ->
 %%% terminate
 %%%
 
-terminate(Reason, S) ->
+terminate(Reason, _S) ->
     io:format("terminatin ~p~n",[Reason]).
     %%ok = gen_udp:close(S#state.socket).
 
