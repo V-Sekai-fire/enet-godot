@@ -13,14 +13,14 @@
 %%% API functions
 %%%===================================================================
 
-start_link(Port, ConnectFun, Options) ->
-    supervisor:start_link(?MODULE, [Port, ConnectFun, Options]).
+start_link(HostId, ConnectFun, Options) ->
+    supervisor:start_link(?MODULE, [HostId, ConnectFun, Options]).
 
 %%%===================================================================
 %%% Supervisor callbacks
 %%%===================================================================
 
-init([Port, ConnectFun, Options]) ->
+init([HostId, ConnectFun, Options]) ->
     SupFlags = #{
         strategy => one_for_one,
         intensity => 1,
@@ -36,7 +36,7 @@ init([Port, ConnectFun, Options]) ->
         start => {
             enet_pool,
             start_link,
-            [Port, PeerLimit]
+            [HostId, PeerLimit]
         },
         restart => permanent,
         shutdown => 2000,
@@ -48,7 +48,7 @@ init([Port, ConnectFun, Options]) ->
         start => {
             enet_host,
             start_link,
-            [Port, ConnectFun, Options]
+            [HostId, ConnectFun, Options]
         },
         restart => permanent,
         shutdown => 2000,
@@ -60,7 +60,7 @@ init([Port, ConnectFun, Options]) ->
         start => {
             enet_disconnector,
             start_link,
-            [Port]
+            [HostId]
         },
         restart => permanent,
         shutdown => 1000,
@@ -72,7 +72,7 @@ init([Port, ConnectFun, Options]) ->
         start => {
             enet_peer_sup,
             start_link,
-            [Port]
+            [HostId]
         },
         restart => permanent,
         shutdown => infinity,

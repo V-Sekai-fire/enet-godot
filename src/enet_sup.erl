@@ -60,7 +60,7 @@ start_host_dtls_supervisor(Port, ConnectFun, Options) ->
     },
     EnetHost = #{
         id => {enet_host_sup, HostId},
-        start => {enet_host_sup, start_link, [Port, ConnectFun, Options]},
+        start => {enet_host_sup, start_link, [HostId, ConnectFun, Options]},
         restart => temporary,
         shutdown => infinity,
         type => supervisor,

@@ -30,8 +30,8 @@
 %%% API
 %%%===================================================================
 
-start_link(Port, PeerLimit) ->
-    gen_server:start_link(?MODULE, [Port, PeerLimit], []).
+start_link(HostId, PeerLimit) ->
+    gen_server:start_link(?MODULE, [HostId, PeerLimit], []).
 
 add_peer(Port, Name) ->
     gproc_pool:add_worker(Port, Name).
@@ -58,15 +58,15 @@ worker_id(Port, Name) ->
 %%% gen_server callbacks
 %%%===================================================================
 
-init([Port, PeerLimit]) ->
+init([HostId, PeerLimit]) ->
     process_flag(trap_exit, true),
-    true = gproc:reg({n, l, {enet_pool, Port}}),
-    try gproc_pool:new(Port, direct, [{size, PeerLimit}, {auto_size, false}]) of
+    true = gproc:reg({n, l, {enet_pool, HostId}}),
+    try gproc_pool:new(HostId, direct, [{size, PeerLimit}, {auto_size, false}]) of
         ok -> ok
     catch
         error:exists -> ok
     end,
-    {ok, #state{port = Port}}.
+    {ok, #state{port = HostId}}.
 
 handle_call(_Request, _From, State) ->
     Reply = ok,

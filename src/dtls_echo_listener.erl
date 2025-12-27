@@ -12,29 +12,40 @@
 
 %%% API
 start_link(Port, HostId, _ConnectFun, _Options) ->
-    gen_server:start_link({local, ?MODULE}, ?MODULE, {Port, HostId}, []).
+    %% Use unique name per HostId to support multiple clients
+    Name = {via, gproc, {n, l, {?MODULE, HostId}}},
+    gen_server:start_link(Name, ?MODULE, {Port, HostId}, []).
 
 %%% gen_server callbacks
 init({Port, HostId}) ->
-    ok = esockd:start(),
-    PrivDir = code:priv_dir(esockd),
-    DtlsOpts = [
-      {mode, binary}, {reuseaddr, true}, {active, 100},
-      {certfile, filename:join(PrivDir, "cert.pem")}, %%"demo.crt")},
-      {keyfile,  filename:join(PrivDir, "key.pem")} %%"demo.key")}
-    ],
-    Opts = [
-      {acceptors, 4},
-      {max_connections, 1000},
-      {dtls_options, DtlsOpts}
-    ],
+    %% Clients (Port=0) don't need a listener - they connect to servers
+    %% Only servers (Port>0) need to listen for incoming connections
+    case Port of
+        0 ->
+            %% Client mode: no listener needed
+            {ok, #state{port=Port}};
+        _ ->
+            %% Server mode: start DTLS listener
+            ok = esockd:start(),
+            PrivDir = code:priv_dir(esockd),
+            DtlsOpts = [
+              {mode, binary}, {reuseaddr, true}, {active, 100},
+              {certfile, filename:join(PrivDir, "cert.pem")}, %%"demo.crt")},
+              {keyfile,  filename:join(PrivDir, "key.pem")} %%"demo.key")}
+            ],
+            Opts = [
+              {acceptors, 4},
+              {max_connections, 1000},
+              {dtls_options, DtlsOpts}
+            ],
 
-    %% Tell esockd to use our connection‐sup to spawn each handler
-    %% Use HostId (not Port) so multiple clients can connect on port 0
-    MFArgs = {dtls_echo_conn_sup, start_child, [HostId]},
-    {ok, _ListenSock} = esockd:open_dtls('echo/dtls', Port, Opts, MFArgs),
+            %% Tell esockd to use our connection‐sup to spawn each handler
+            %% Use HostId (not Port) so multiple clients can connect on port 0
+            MFArgs = {dtls_echo_conn_sup, start_child, [HostId]},
+            {ok, _ListenSock} = esockd:open_dtls('echo/dtls', Port, Opts, MFArgs),
 
-    {ok, #state{port=Port}}.
+            {ok, #state{port=Port}}
+    end.
 
 handle_info(_Info, State) ->
     %% We don’t expect “normal” messages here
