@@ -55,7 +55,7 @@ init({AssignedPort, ConnectFun, Options, Transport, RawSocket}) ->
     gproc:reg({p, l, port}, AssignedPort),
     %%gproc:reg({p, l, peer_id}, PeerID),
 
-        Compressor = 
+        Compressor =
         case lists:keyfind(compression_mode, 1, Options) of
             {compression_mode, CompressionMode} -> CompressionMode;
             false -> none
@@ -77,7 +77,7 @@ init({AssignedPort, ConnectFun, Options, IP, RemotePort, ChannelCount, Data}) ->
     gproc:reg({p, l, port}, AssignedPort),
     %%gproc:reg({p, l, peer_id}, PeerID),
 
-        Compressor = 
+        Compressor =
         case lists:keyfind(compression_mode, 1, Options) of
             {compression_mode, CompressionMode} -> CompressionMode;
             false -> none
@@ -127,7 +127,7 @@ client_connect(internal, exec, State0 = #state{remote_ip = RemoteIP, remote_port
           {active,        true}
         ],
     %% Connect to a DTLS session
-    io:format("Echo client: Attempting SSL connect to ~p:~p with certs: ~p, ~p, ~p~n", 
+    io:format("Echo client: Attempting SSL connect to ~p:~p with certs: ~p, ~p, ~p~n",
               [RemoteIP, RemotePort, FinalClientCert, FinalClientKey, FinalCACert]),
     %% Check if certificate files exist
     case filelib:is_file(FinalClientCert) andalso filelib:is_file(FinalClientKey) andalso filelib:is_file(FinalCACert) of
@@ -142,7 +142,7 @@ client_connect(internal, exec, State0 = #state{remote_ip = RemoteIP, remote_port
                 IPBin when is_binary(IPBin) ->
                     case inet:parse_address(binary_to_list(IPBin)) of
                         {ok, Addr} -> Addr;
-                        _ -> 
+                        _ ->
                             Parts = string:tokens(binary_to_list(IPBin), "."),
                             PartsInt = [list_to_integer(P) || P <- Parts],
                             list_to_tuple(PartsInt)
@@ -150,7 +150,7 @@ client_connect(internal, exec, State0 = #state{remote_ip = RemoteIP, remote_port
                 IPStr when is_list(IPStr) ->
                     case inet:parse_address(IPStr) of
                         {ok, Addr} -> Addr;
-                        _ -> 
+                        _ ->
                             Parts = string:tokens(IPStr, "."),
                             PartsInt = [list_to_integer(P) || P <- Parts],
                             list_to_tuple(PartsInt)
@@ -168,15 +168,15 @@ client_connect(internal, exec, State0 = #state{remote_ip = RemoteIP, remote_port
                     {error, {exception, Class, ExceptionReason}}
             end,
             case ConnectResult of
-      {ok, Socket} ->
-        io:format("Echo client transport ok, socket ~p~n", [Socket]),
-        {ok, PeerName} = ssl:peername(Socket),
-        State = State0#state{socket=Socket, peername=PeerName},
+              {ok, Socket} ->
+                io:format("Echo client transport ok, socket ~p~n", [Socket]),
+                {ok, PeerName} = ssl:peername(Socket),
+                State = State0#state{socket=Socket, peername=PeerName},
                 %% Handshake is complete, go directly to connected state
                 {next_state, connected, State, [{next_event, internal, client_add_peer}]};
               {error, ConnectReason} ->
                 io:format("Echo client transport fail, reason ~p~n", [ConnectReason]),
-                io:format("Echo client transport error details - Opts: ~p, RemoteIP: ~p, RemotePort: ~p~n", 
+                io:format("Echo client transport error details - Opts: ~p, RemoteIP: ~p, RemotePort: ~p~n",
                           [Opts, IPAddr, RemotePort]),
                 {stop, {handshake_failed, ConnectReason}, State0}
             end
@@ -217,9 +217,9 @@ handshake({call, From}, {send_outgoing_commands, C, _IP, _Port, PeerID}, S) ->
             {keep_state, S, [{reply, From, {error, handshake_in_progress}}]};
         _ ->
             %% Socket ready - send the packet
-            {Compressed, Commands} = 
+            {Compressed, Commands} =
                 case CompressionMode of
-                    none -> 
+                    none ->
                         {0, C}; % uncompressed
                     Compressor ->
                         {1, compress(C, Compressor)}
@@ -258,7 +258,7 @@ handshake(internal, client, State0 = #state{raw_socket=_RawSocket, socket=Socket
         io:format("Echo client handshake error details: Socket=~p, State=~p~n", [Socket, State0]),
         %%Transport:fast_close(RawSocket),
         {stop, {handshake_failed, HandshakeReason}, State0}
-    end. 
+    end.
 
 %%% Handle all DTLS/SSL messages
 connected(info, {ssl, _Raw, Packet}, State = #state{transport=_T, socket=_Socket, peername=P}) ->
@@ -291,7 +291,7 @@ connected(info, {ssl_error, _Raw, Reason}, State = #state{peername=P}) ->
 
 connected(info, _Other, State) ->
     {keep_state, State};
-                                 
+
 
 connected(internal, client_add_peer, S) ->
     %%
@@ -302,7 +302,7 @@ connected(internal, client_add_peer, S) ->
     %%
     #state{
         connect_fun = ConnectFun,
-        remote_ip=IP, 
+        remote_ip=IP,
         remote_port=Port,
         channels=Channels,
         connect_packet_data = Data
@@ -355,9 +355,9 @@ connected({call, From}, {send_outgoing_commands, C, _IP, _Port, PeerID}, S) ->
         transport = Transport,
         socket = Socket
     } = S,
-    {Compressed, Commands} = 
+    {Compressed, Commands} =
         case CompressionMode of
-            none -> 
+            none ->
                 {0, C}; % uncompressed
             Compressor ->
                 {1, compress(C, Compressor)}
@@ -387,7 +387,7 @@ code_change(_Old, _StateName, State, _Extra) ->
 
 
 
-%% Internal 
+%% Internal
 demux_packet(IP, Port, Packet, S) ->
     %%
     %% Received a UDP packet.
@@ -451,7 +451,7 @@ demux_packet(IP, Port, Packet, S) ->
         PeerID ->
             CurrentPeerID = get_peer_id(self()),
             case PeerID =:= CurrentPeerID  of
-                true -> 
+                true ->
                     case enet_pool:pick_peer(LocalPort, CurrentPeerID) of
                         false ->
                             ok; %% Peer process failed?
@@ -463,7 +463,7 @@ demux_packet(IP, Port, Packet, S) ->
     end.
 
 %%get_next_peer_id() ->
-    %% TODO: Replace with random unique 12bit uint excluding 16#FFF 
+    %% TODO: Replace with random unique 12bit uint excluding 16#FFF
 %%    make_ref().
 
 get_name(Pid) ->
@@ -493,7 +493,7 @@ start_peer(Peer = #enet_peer{name = Ref}) ->
     _Ref = gproc:monitor({n, l, {enet_peer, Ref}}),
     {ok, Pid}.
 
-decompress(Data, zlib) -> 
+decompress(Data, zlib) ->
     zlib:uncompress(Data);
 decompress(_Data, Mode) ->
     unsupported_compress_mode(Mode).
@@ -503,5 +503,5 @@ compress(Data, zlib) ->
 compress(_Data, Mode) ->
     unsupported_compress_mode(Mode).
 
-unsupported_compress_mode(Mode) -> 
+unsupported_compress_mode(Mode) ->
     logger:error("Unsupported compression mode: ~p", [Mode]).

@@ -118,7 +118,7 @@ handle_cast({recv_unreliable, {#command_header{}, C = #unreliable{sequence_numbe
     Expected = S0#state.incoming_unreliable_sequence_number,
     if
         % The guard is more complex because we need to account for wrapped
-        % sequence numbers. 
+        % sequence numbers.
         N < Expected; N - Expected >= ?ENET_MAX_SEQ_INDEX/2  ->
             %% Data is old - drop it and continue.
             logger:debug("Discard outdated packet. Recv: ~p. Expect: ~p", [N, Expected]),
@@ -150,7 +150,7 @@ handle_cast({recv_reliable, {#command_header{reliable_sequence_number = N}, C = 
     Expected = S0#state.incoming_reliable_sequence_number,
     if
         % These guards are more complex because we need to account for wrapped
-        % sequence numbers. 
+        % sequence numbers.
         N > Expected; N - Expected =< -?ENET_MAX_SEQ_INDEX/2  ->
             logger:debug("Buffer ahead-of-sequence packet. Recv: ~p. Expect: ~p.", [N, Expected]),
             ReliableWindow0 = S0#state.reliable_window,

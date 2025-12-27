@@ -1,13 +1,18 @@
 # enet
-A complete re-implementation of the [ENet](http://enet.bespin.org/) protocol in Erlang/OTP.
 
-*NOTE*: This is a friendly fork of https://github.com/flambard/enet. This fork is being 
-tested against and adapted to the C implementation of ENet as used by the Godot engine. 
+A complete re-implementation of the [ENet](http://enet.bespin.org/) protocol in
+Erlang/OTP.
+
+_NOTE_: This is a friendly fork of <https://github.com/flambard/enet>. This fork
+is being tested against and adapted to the C implementation of ENet as used by
+the Godot engine.
 
 ## API
+
 The module `enet` presents the API of enet.
 
 ### Data Types
+
 ```erlang
 port_number() = 0..65535
 
@@ -23,6 +28,7 @@ channels() = #{ non_neg_integer() := pid() }
 ### Functions
 
 #### start_host/3
+
 ```erlang
 start_host(Port, ConnectFun, Options) -> {ok, port_number()} | {error, term()}
 
@@ -38,19 +44,27 @@ start_host(Port, ConnectFun, Options) -> {ok, port_number()} | {error, term()}
       {outgoing_bandwidth, bytes_per_second()} |
       {compression_mode, atom()}
 ```
-Start a new host. If `Port` set to `0`, the port will be dynamically assigned by the underlying operating system. The assigned port is returned.
 
-The `ConnectFun` function or MFA tuple will be called when a new peer has started and a connection to a remote peer has been established. This function is expected to spawn a new process and return a pid to which all messages from the new peer will be sent.
+Start a new host. If `Port` set to `0`, the port will be dynamically assigned by
+the underlying operating system. The assigned port is returned.
+
+The `ConnectFun` function or MFA tuple will be called when a new peer has
+started and a connection to a remote peer has been established. This function is
+expected to spawn a new process and return a pid to which all messages from the
+new peer will be sent.
 
 #### stop_host/1
+
 ```erlang
 stop_host(Port) -> ok
 
     Port = port_number()
 ```
+
 Stop a host listening on `Port`.
 
 #### connect_peer/4
+
 ```erlang
 connect_peer(HostPort, IP, RemotePort, ChannelCount) -> {ok, Peer} | {error, atom()}
 
@@ -60,9 +74,15 @@ connect_peer(HostPort, IP, RemotePort, ChannelCount) -> {ok, Peer} | {error, ato
     ChannelCount = channel_count()
     Peer = pid()
 ```
-Start a new peer on the host listening on `HostPort` connecting to a remote host on address `IP:RemotePort`. The peer process will call `ConnectFun` (given to start_host/3) when the handshake has been completed successfully. A random _uint32_ integer will be sent as **peer_id** in enet `CONNECT` packet 'Data' field, as required by Godot.
+
+Start a new peer on the host listening on `HostPort` connecting to a remote host
+on address `IP:RemotePort`. The peer process will call `ConnectFun` (given to
+start*host/3) when the handshake has been completed successfully. A random
+\_uint32* integer will be sent as **peer_id** in enet `CONNECT` packet 'Data'
+field, as required by Godot.
 
 #### connect_peer/5
+
 ```erlang
 connect_peer(HostPort, IP, RemotePort, ChannelCount, Data) -> {ok, Peer} | {error, atom()}
 
@@ -73,52 +93,67 @@ connect_peer(HostPort, IP, RemotePort, ChannelCount, Data) -> {ok, Peer} | {erro
     Peer = pid()
     Data = pos_integer()
 ```
-Start a new peer on the host listening on `HostPort` connecting to a remote host on address `IP:RemotePort`. The peer process will call `ConnectFun` (given to start_host/3) when the handshake has been completed successfully. 'Data' must be a _uint32_ integer that will be sent in enet `CONNECT` packet 'Data' field.
+
+Start a new peer on the host listening on `HostPort` connecting to a remote host
+on address `IP:RemotePort`. The peer process will call `ConnectFun` (given to
+start*host/3) when the handshake has been completed successfully. 'Data' must be
+a \_uint32* integer that will be sent in enet `CONNECT` packet 'Data' field.
 
 #### disconnect_peer/1
+
 ```erlang
 disconnect_peer(Peer) -> ok
 
     Peer = pid()
 ```
+
 Disconnect `Peer`.
 
 #### disconnect_peer_now/1
+
 ```erlang
 disconnect_peer_now(Peer) -> ok
 
     Peer = pid()
 ```
+
 Disconnect `Peer` immediately without waiting for an ACK from the remote peer.
 
 #### send_unsequenced/2
+
 ```erlang
 send_unsequenced(Channel, Data) -> ok
 
     Channel = pid()
     Data = iodata()
 ```
-Send *unsequenced* data to the remote peer over `Channel`.
+
+Send _unsequenced_ data to the remote peer over `Channel`.
 
 #### send_unreliable/2
+
 ```erlang
 send_unreliable(Channel, Data) -> ok
 
     Channel = pid()
     Data = iodata()
 ```
-Send *unreliable* data to the remote peer over `Channel`.
+
+Send _unreliable_ data to the remote peer over `Channel`.
 
 #### send_reliable/2
+
 ```erlang
 send_reliable(Channel, Data) -> ok
 
     Channel = pid()
     Data = iodata()
 ```
-Send *reliable* data to the remote peer over `Channel`.
+
+Send _reliable_ data to the remote peer over `Channel`.
 
 #### broadcast_unsequenced/3
+
 ```erlang
 broadcast_unsequenced(HostPort, ChannelID, Data) -> ok
 
@@ -126,9 +161,12 @@ broadcast_unsequenced(HostPort, ChannelID, Data) -> ok
     ChannelID = integer()
     Data = iodata()
 ```
-Broadcast *unsequenced* data to all peers connected to `HostPort` on `ChannelID`.
+
+Broadcast _unsequenced_ data to all peers connected to `HostPort` on
+`ChannelID`.
 
 #### broadcast_unreliable/3
+
 ```erlang
 broadcast_unreliable(HostPort, ChannelID, Data) -> ok
 
@@ -136,9 +174,11 @@ broadcast_unreliable(HostPort, ChannelID, Data) -> ok
     ChannelID = integer()
     Data = iodata()
 ```
-Broadcast *unreliable* data to all peers connected to `HostPort` on `ChannelID`.
+
+Broadcast _unreliable_ data to all peers connected to `HostPort` on `ChannelID`.
 
 #### broadcast_reliable/3
+
 ```erlang
 broadcast_reliable(HostPort, ChannelID, Data) -> ok
 
@@ -146,10 +186,13 @@ broadcast_reliable(HostPort, ChannelID, Data) -> ok
     ChannelID = integer()
     Data = iodata()
 ```
-Broadcast *reliable* data to all peers connected to `HostPort` on `ChannelID`.
+
+Broadcast _reliable_ data to all peers connected to `HostPort` on `ChannelID`.
 
 ## Examples
+
 ### Creating an ENet server
+
 ```erlang
 ListeningPort = 1234,
 ConnectFun = fun(PeerInfo) ->
@@ -162,7 +205,9 @@ Options = [{peer_limit, 8}, {channel_limit, 3}],
 ...
 enet:stop_host(Host).
 ```
+
 ### Creating an ENet client and connecting to a server
+
 ```erlang
 ListeningPort = 0, %% Port will be dynamically assigned
 ConnectFun = fun(PeerInfo) ->
@@ -180,7 +225,9 @@ ChannelCount = 3
 ...
 enet:stop_host(Host).
 ```
+
 ### Sending packets to an ENet peer
+
 ```erlang
 worker_loop(PeerInfo = #{channels := Channels}, State) ->
     ...
@@ -194,7 +241,9 @@ worker_loop(PeerInfo = #{channels := Channels}, State) ->
     ...
     worker_loop(PeerInfo, State).
 ```
+
 ### Receiving packets from an ENet peer
+
 ```erlang
 worker_loop(PeerInfo, State) ->
     ...

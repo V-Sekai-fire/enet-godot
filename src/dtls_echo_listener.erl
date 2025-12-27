@@ -131,4 +131,3 @@ close_port(Proto, Port) ->
             io:format("Failed to close port ~p ~p: ~p~n", [Proto, Port, Reason]),
             {error, Reason}
     end.
-

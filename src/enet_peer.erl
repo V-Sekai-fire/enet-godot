@@ -43,7 +43,7 @@
 -record(state, {
     local_port,
     ip,
-    port,                
+    port,
     manager_name = undefined,
     manager_pid = undefined,
     remote_peer_id = undefined,
@@ -189,7 +189,7 @@ init([LocalPort, P = #enet_peer{handshake_flow = local}]) ->
         host = Host,
         local_port = LocalPort,
         ip = IP,
-        port = Port,      
+        port = Port,
         manager_name = ManagerName,
         manager_pid = ManagerPid,
         peer_id = PeerID,
@@ -225,7 +225,7 @@ init([LocalPort, P = #enet_peer{handshake_flow = remote}]) ->
         local_port = LocalPort,
         ip = IP,
         port = Port,
-        peer_id = PeerID,       
+        peer_id = PeerID,
         manager_name = ManagerName,
         manager_pid = ManagerPid,
         connect_fun = ConnectFun,
@@ -245,7 +245,7 @@ connecting(enter, _OldState, S) ->
     %% Sending the initial Connect command.
     %%
     #state{
-        host = Host,      
+        host = Host,
         manager_pid = ManagerPid,
         channel_count = ChannelCount,
         ip = IP,
@@ -337,7 +337,7 @@ connecting(cast, {incoming_command, {H, C=#verify_connect{}}}, S) ->
     } = S,
     {ChannelID, SentTime, SequenceNr} = ConnectTimerID,
     CanceledTimeout = cancel_resend_timer(ChannelID, SentTime, SequenceNr),
-    NewS = S#state{connect_timer_id = undefined}, 
+    NewS = S#state{connect_timer_id = undefined},
     %% now jump into acknowledging_verify_connect *and* immediately
     %% re‐fire the same verify_connect event there:
     {next_state, acknowledging_verify_connect, NewS,
@@ -1029,7 +1029,7 @@ send_outgoing_commands(ManagerPid, Data, IP, Port, PeerID) ->
             gen_server:call(ManagerPid, {send_outgoing_commands, Data, IP, Port, PeerID}, 5000);
         Class:Reason ->
             %% Other error - log and try gen_server as fallback
-            logger:error("gen_statem:call failed for ManagerPid ~p: ~p:~p, trying gen_server", 
+            logger:error("gen_statem:call failed for ManagerPid ~p: ~p:~p, trying gen_server",
                         [ManagerPid, Class, Reason]),
             gen_server:call(ManagerPid, {send_outgoing_commands, Data, IP, Port, PeerID}, 5000)
     end.

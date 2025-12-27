@@ -115,7 +115,7 @@ init({HostId, ConnectFun, Options}) ->
             {outgoing_bandwidth, OBandwidth} -> OBandwidth;
             false -> 0
         end,
-    Compressor = 
+    Compressor =
         case lists:keyfind(compression_mode, 1, Options) of
             {compression_mode, CompressionMode} -> CompressionMode;
             false -> none
@@ -133,7 +133,7 @@ init({HostId, ConnectFun, Options}) ->
     ),
     %%TODO: Evaluate restart behaviour
     %%ok = inet:setopts(Socket, [{active, true}]),
-    {ok, #state{connect_fun = ConnectFun, 
+    {ok, #state{connect_fun = ConnectFun,
                 compressor = Compressor,
                 transport = undefined,
                 peername = undefined,
@@ -191,20 +191,20 @@ handle_call({send_outgoing_commands, C, IP, Port, ID}, _From, S) ->
             io:format("ENet Host: Cannot send - socket is undefined (DTLS mode?)~n"),
             {reply, {error, no_socket}, S};
         _ ->
-    {Compressed, Commands} = 
-        case CompressionMode of
-            none -> 
-                {0, C}; % uncompressed
-            Compressor ->
-                {1, compress(C, Compressor)}
-        end,
-    SentTime = get_time(),
-    PH = #protocol_header{
-        compressed = Compressed,
-        peer_id = ID,
-        sent_time = SentTime
-    },
-    Packet = [enet_protocol_encode:protocol_header(PH), Commands],
+            {Compressed, Commands} =
+                case CompressionMode of
+                    none ->
+                        {0, C}; % uncompressed
+                    Compressor ->
+                        {1, compress(C, Compressor)}
+                end,
+            SentTime = get_time(),
+            PH = #protocol_header{
+                compressed = Compressed,
+                peer_id = ID,
+                sent_time = SentTime
+            },
+            Packet = [enet_protocol_encode:protocol_header(PH), Commands],
             io:format("ENet Host: Sending UDP packet to ~p:~p, size=~p~n", [IP, Port, iolist_size(Packet)]),
             %% Convert IP string/binary to tuple if needed (gen_udp:send requires tuple format)
             IPAddr = case IP of
@@ -212,7 +212,7 @@ handle_call({send_outgoing_commands, C, IP, Port, ID}, _From, S) ->
                     IPStr = binary_to_list(IPBin),
                     case inet:parse_address(IPStr) of
                         {ok, Addr} -> Addr;
-                        _ -> 
+                        _ ->
                             %% Fallback: parse "127.0.0.1" format manually
                             Parts = string:tokens(IPStr, "."),
                             PartsInt = [list_to_integer(P) || P <- Parts],
@@ -221,7 +221,7 @@ handle_call({send_outgoing_commands, C, IP, Port, ID}, _From, S) ->
                 IPStr when is_list(IPStr) ->
                     case inet:parse_address(IPStr) of
                         {ok, Addr} -> Addr;
-                        _ -> 
+                        _ ->
                             %% Fallback: parse "127.0.0.1" format manually
                             Parts = string:tokens(IPStr, "."),
                             PartsInt = [list_to_integer(P) || P <- Parts],
@@ -398,7 +398,7 @@ start_peer(Peer = #enet_peer{name = Ref}) ->
     _Ref = gproc:monitor({n, l, {enet_peer, Ref}}),
     {ok, Pid}.
 
-decompress(Data, zlib) -> 
+decompress(Data, zlib) ->
     zlib:uncompress(Data);
 decompress(_Data, Mode) ->
     unsupported_compress_mode(Mode).
@@ -408,5 +408,5 @@ compress(Data, zlib) ->
 compress(_Data, Mode) ->
     unsupported_compress_mode(Mode).
 
-unsupported_compress_mode(Mode) -> 
+unsupported_compress_mode(Mode) ->
     logger:error("Unsupported compression mode: ~p", [Mode]).
