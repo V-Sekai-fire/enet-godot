@@ -104,7 +104,9 @@ handle_cast(
 ) ->
     Worker = S0#state.worker,
     ID = S0#state.id,
-    Worker ! {enet, ID, C},
+    % Extract data from command record before sending to worker
+    Data = C#unsequenced.data,
+    Worker ! {enet, ID, Data},
     {noreply, S0};
 handle_cast({send_unsequenced, Data}, S0) ->
     ID = S0#state.id,
@@ -125,7 +127,9 @@ handle_cast({recv_unreliable, {#command_header{}, C = #unreliable{sequence_numbe
         true ->
             Worker = S0#state.worker,
             ID = S0#state.id,
-            Worker ! {enet, ID, C},
+            % Extract data from command record before sending to worker
+            Data = C#unreliable.data,
+            Worker ! {enet, ID, Data},
             NextSeq = maybe_wrap(N+1),
             S1 = S0#state{incoming_unreliable_sequence_number = NextSeq},
             {noreply, S1}
@@ -160,7 +164,9 @@ handle_cast({recv_reliable, {#command_header{reliable_sequence_number = N}, C = 
             ID = S0#state.id,
             % Dispatch this packet
             Worker = S0#state.worker,
-            Worker ! {enet, ID, C},
+            % Extract data from command record before sending to worker
+            Data = C#reliable.data,
+            Worker ! {enet, ID, Data},
             % Dispatch any buffered packets
             Window = S0#state.reliable_window,
             SortedWindow = wrapped_sort(Window),
@@ -207,7 +213,14 @@ dispatch(CurSeq, Window = [{Seq1, D1} | RemainingWindow], ChannelID, Worker) ->
         true ->
             % Dispatch the packet
             logger:debug("Dispatching queued packet ~p", [Seq1]),
-            Worker ! {enet, ChannelID, D1},
+            % Extract data from command record before sending to worker
+            Data = case D1 of
+                #reliable{} -> D1#reliable.data;
+                #unreliable{} -> D1#unreliable.data;
+                #unsequenced{} -> D1#unsequenced.data;
+                _ -> D1
+            end,
+            Worker ! {enet, ChannelID, Data},
             dispatch(NextSeq, RemainingWindow, ChannelID, Worker);
         _ ->
             % The first packet in the window is not the one we're looking for,
