@@ -168,10 +168,10 @@ client_connect(internal, exec, State0 = #state{remote_ip = RemoteIP, remote_port
                     {error, {exception, Class, ExceptionReason}}
             end,
             case ConnectResult of
-              {ok, Socket} ->
-                io:format("Echo client transport ok, socket ~p~n", [Socket]),
-                {ok, PeerName} = ssl:peername(Socket),
-                State = State0#state{socket=Socket, peername=PeerName},
+      {ok, Socket} ->
+        io:format("Echo client transport ok, socket ~p~n", [Socket]),
+        {ok, PeerName} = ssl:peername(Socket),
+        State = State0#state{socket=Socket, peername=PeerName},
                 %% Handshake is complete, go directly to connected state
                 {next_state, connected, State, [{next_event, internal, client_add_peer}]};
               {error, ConnectReason} ->

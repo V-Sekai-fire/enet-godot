@@ -245,7 +245,7 @@ connecting(enter, _OldState, S) ->
     %% Sending the initial Connect command.
     %%
     #state{
-        host = Host,
+        host = Host,      
         manager_pid = ManagerPid,
         channel_count = ChannelCount,
         ip = IP,

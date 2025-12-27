@@ -191,20 +191,20 @@ handle_call({send_outgoing_commands, C, IP, Port, ID}, _From, S) ->
             io:format("ENet Host: Cannot send - socket is undefined (DTLS mode?)~n"),
             {reply, {error, no_socket}, S};
         _ ->
-            {Compressed, Commands} = 
-                case CompressionMode of
-                    none -> 
-                        {0, C}; % uncompressed
-                    Compressor ->
-                        {1, compress(C, Compressor)}
-                end,
-            SentTime = get_time(),
-            PH = #protocol_header{
-                compressed = Compressed,
-                peer_id = ID,
-                sent_time = SentTime
-            },
-            Packet = [enet_protocol_encode:protocol_header(PH), Commands],
+    {Compressed, Commands} = 
+        case CompressionMode of
+            none -> 
+                {0, C}; % uncompressed
+            Compressor ->
+                {1, compress(C, Compressor)}
+        end,
+    SentTime = get_time(),
+    PH = #protocol_header{
+        compressed = Compressed,
+        peer_id = ID,
+        sent_time = SentTime
+    },
+    Packet = [enet_protocol_encode:protocol_header(PH), Commands],
             io:format("ENet Host: Sending UDP packet to ~p:~p, size=~p~n", [IP, Port, iolist_size(Packet)]),
             %% Convert IP string/binary to tuple if needed (gen_udp:send requires tuple format)
             IPAddr = case IP of
