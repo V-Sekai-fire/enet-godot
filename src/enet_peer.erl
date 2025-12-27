@@ -759,12 +759,22 @@ connected(cast, {outgoing_command, {H, C = #reliable{}}}, S) ->
     {keep_state, S, [SendReliableTimeout, SendTimeout]};
 connected(info, {enet, ChannelID, C}, S) ->
     %%
-    %% Received a message that should be forwarded to the worker.
-    %% This can happen if messages are sent to the peer instead of the worker.
+    %% Received a message from a channel.
+    %% Channels send {enet, ChannelID, C} to the worker.
+    %% If the worker is the peer itself (shouldn't happen in normal flow),
+    %% we receive it here as an :info event and forward to the worker.
     %%
     #state{worker = Worker} = S,
-    Worker ! {enet, ChannelID, C},
-    {keep_state, S};
+    case Worker of
+        self() ->
+            % Worker is the peer itself - this shouldn't happen but handle gracefully
+            logger:warning("Peer received {enet, ChannelID, C} but worker is self() - dropping"),
+            {keep_state, S};
+        _ ->
+            % Forward to worker (typically the peer_loop process spawned by connect_fun)
+            Worker ! {enet, ChannelID, C},
+            {keep_state, S}
+    end;
 connected(cast, disconnect, State) ->
     %%
     %% Disconnecting.
