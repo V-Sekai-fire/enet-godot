@@ -61,11 +61,11 @@ start_dtls_host(Port, ConnectFun, Options) ->
         {error, Reason} ->
             io:format("Startup dtls failure ~p~n", [Reason]),
             {error, Reason};
-        {ok, _HostSup} ->        
+        {ok, HostId} ->        
             io:format("Startup dtls success"),
             %%Host = gproc:where({n, l, {enet_host, AssignedPort}}),
             %%%enet_host:give_socket(Host, Socket),
-            {ok, Port}
+            {ok, HostId}
     end.
 
 

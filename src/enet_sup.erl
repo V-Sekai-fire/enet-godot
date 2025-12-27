@@ -34,11 +34,16 @@ start_host_supervisor(Port, ConnectFun, Options) ->
 
 start_host_dtls_supervisor(Port, ConnectFun, Options) ->
     %%Port = 5684,
-    %% Only one host supported for now
-    %% Listener: the socket listener gen_server
+    %% Generate unique ID for this host instance (supports multiple clients on port 0)
+    %% Use timestamp + random to ensure uniqueness
+    HostId = case Port of
+        0 -> erlang:unique_integer([positive, monotonic]);
+        _ -> Port
+    end,
+    %% Listener: the socket listener gen_server (needs both Port for socket and HostId for connections)
     Listener = #{
-        id => {listener, Port},
-        start => {dtls_echo_listener, start_link, [Port, ConnectFun, Options]},
+        id => {listener, HostId},
+        start => {dtls_echo_listener, start_link, [Port, HostId, ConnectFun, Options]},
         restart => permanent,
         shutdown => 5000, %%infinity,
         type => worker,
@@ -46,24 +51,33 @@ start_host_dtls_supervisor(Port, ConnectFun, Options) ->
     },
     %% ConnSup: dynamic supervisor for connections
     ConnSup = #{
-        id => {connection_sup, Port},
-        start => {dtls_echo_conn_sup, start_link, [Port, ConnectFun, Options]},
+        id => {connection_sup, HostId},
+        start => {dtls_echo_conn_sup, start_link, [HostId, ConnectFun, Options]},
         restart => permanent,
         shutdown => 5000, %%infinity,
         type => supervisor,
         modules => [dtls_echo_conn_sup]
     },
     EnetHost = #{
-        id => {enet_host_sup, Port},
+        id => {enet_host_sup, HostId},
         start => {enet_host_sup, start_link, [Port, ConnectFun, Options]},
         restart => temporary,
         shutdown => infinity,
         type => supervisor,
         modules => [enet_host_sup]
     },
-    supervisor:start_child(?MODULE, Listener),
-    supervisor:start_child(?MODULE, ConnSup),
-    supervisor:start_child(?MODULE, EnetHost).
+    case supervisor:start_child(?MODULE, Listener) of
+        {ok, _} ->
+            case supervisor:start_child(?MODULE, ConnSup) of
+                {ok, _} ->
+                    case supervisor:start_child(?MODULE, EnetHost) of
+                        {ok, _} -> {ok, HostId};
+                        Error -> Error
+                    end;
+                Error -> Error
+            end;
+        Error -> Error
+    end.
 
 stop_host_supervisor(HostSup) ->
     supervisor:terminate_child(?MODULE, HostSup).

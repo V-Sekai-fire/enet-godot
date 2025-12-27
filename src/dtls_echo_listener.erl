@@ -2,7 +2,7 @@
 -module(dtls_echo_listener).
 -behaviour(gen_server).
 
--export([start_link/3]).
+-export([start_link/4]).
 -export([open_port/3, close_port/2]).
 -export([init/1, handle_info/2, handle_cast/2, handle_call/3, terminate/2, code_change/3]).
 
@@ -11,11 +11,11 @@
 }).
 
 %%% API
-start_link(Port, _ConnectFun, _Options) ->
-    gen_server:start_link({local, ?MODULE}, ?MODULE, Port, []).
+start_link(Port, HostId, _ConnectFun, _Options) ->
+    gen_server:start_link({local, ?MODULE}, ?MODULE, {Port, HostId}, []).
 
 %%% gen_server callbacks
-init(Port) ->
+init({Port, HostId}) ->
     ok = esockd:start(),
     PrivDir = code:priv_dir(esockd),
     DtlsOpts = [
@@ -30,7 +30,8 @@ init(Port) ->
     ],
 
     %% Tell esockd to use our connection‐sup to spawn each handler
-    MFArgs = {dtls_echo_conn_sup, start_child, [Port]},
+    %% Use HostId (not Port) so multiple clients can connect on port 0
+    MFArgs = {dtls_echo_conn_sup, start_child, [HostId]},
     {ok, _ListenSock} = esockd:open_dtls('echo/dtls', Port, Opts, MFArgs),
 
     {ok, #state{port=Port}}.
@@ -55,6 +56,7 @@ code_change(_OldVsn, State, _Extra) ->
 
 %% Functions
 open_port(dtls, Port, Opts) ->
+    %% For server-side, use Port as HostId (servers use fixed ports)
     MFArgs = {dtls_echo_conn_sup, start_child, [Port]},
     case esockd:open_dtls('echo/dtls', Port, Opts, MFArgs) of
         {ok, ListenSock} ->
