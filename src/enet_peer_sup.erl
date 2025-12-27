@@ -14,8 +14,8 @@
 %%% API functions
 %%%===================================================================
 
-start_link(Port) ->
-    supervisor:start_link(?MODULE, [Port]).
+start_link(HostId) ->
+    supervisor:start_link(?MODULE, [HostId]).
 
 start_peer(Supervisor, Peer) ->
     supervisor:start_child(Supervisor, [Peer]).
@@ -24,8 +24,8 @@ start_peer(Supervisor, Peer) ->
 %%% Supervisor callbacks
 %%%===================================================================
 
-init([Port]) ->
-    true = gproc:reg({n, l, {enet_peer_sup, Port}}),
+init([HostId]) ->
+    true = gproc:reg({n, l, {enet_peer_sup, HostId}}),
     SupFlags = #{
         strategy => simple_one_for_one,
         intensity => 1,
@@ -34,7 +34,7 @@ init([Port]) ->
     ChildSpecs = [
         #{
             id => enet_peer,
-            start => {enet_peer, start_link, [Port]},
+            start => {enet_peer, start_link, [HostId]},
             restart => temporary,
             shutdown => brutal_kill,
             type => worker,

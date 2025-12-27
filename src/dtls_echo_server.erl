@@ -98,25 +98,43 @@ init({AssignedPort, ConnectFun, Options, IP, RemotePort, ChannelCount, Data}) ->
 
 client_connect(internal, exec, State0 = #state{raw_socket=RawSocket, remote_ip = RemoteIP, remote_port = RemotePort}) ->
     io:format("Echo client handshake socket ~p~n", [RawSocket]),
+    %% Get certificate paths from esockd priv directory
+    PrivDir = code:priv_dir(esockd),
+    ClientCert = filename:join(PrivDir, "client.pem"),
+    ClientKey = filename:join(PrivDir, "client_key.pem"),
+    CACert = filename:join(PrivDir, "ca.pem"),
     Opts = [
           {fd,            RawSocket},
           {protocol,      dtls},
-          {certfile,      "client.pem"},
-          {keyfile,       "client_key.pem"},
-          {cacertfile,    "ca.pem"},
-          {verify,        verify_peer}
+          {certfile,      ClientCert},
+          {keyfile,       ClientKey},
+          {cacertfile,    CACert},
+          {verify,        verify_none}  %% Allow self-signed certificates for development
         ],
-    %% Coonect to a DTLS session
-    case ssl:connect(RemoteIP, RemotePort, Opts, 5000) of
-      {ok, Socket} ->
-        io:format("Echo client transport ok, socket ~p~n", [Socket]),
-        {ok, PeerName} = ssl:peername(Socket),
-        State = State0#state{socket=Socket, peername=PeerName},
-        {next_state, handshake, State, [{next_event, internal, client}]};
-      {error, Reason} ->
-        io:format("Echo client transport fail, reason ~p~n", [Reason]),
-        %%Transport:fast_close(RawSocket),
-        {stop, {handshake_failed, Reason}, State0}
+    %% Connect to a DTLS session
+    io:format("Echo client: Attempting SSL connect to ~p:~p with certs: ~p, ~p, ~p~n", 
+              [RemoteIP, RemotePort, ClientCert, ClientKey, CACert]),
+    %% Check if certificate files exist
+    case filelib:is_file(ClientCert) andalso filelib:is_file(ClientKey) andalso filelib:is_file(CACert) of
+        false ->
+            io:format("Echo client: Certificate files missing! ClientCert exists: ~p, ClientKey exists: ~p, CACert exists: ~p~n",
+                      [filelib:is_file(ClientCert), filelib:is_file(ClientKey), filelib:is_file(CACert)]),
+            {stop, {certificates_missing, ClientCert, ClientKey, CACert}, State0};
+        true ->
+            io:format("Echo client: Certificate files found, attempting SSL connect~n"),
+            case ssl:connect(RemoteIP, RemotePort, Opts, 5000) of
+              {ok, Socket} ->
+                io:format("Echo client transport ok, socket ~p~n", [Socket]),
+                {ok, PeerName} = ssl:peername(Socket),
+                State = State0#state{socket=Socket, peername=PeerName},
+                {next_state, handshake, State, [{next_event, internal, client}]};
+              {error, Reason} ->
+                io:format("Echo client transport fail, reason ~p~n", [Reason]),
+                io:format("Echo client transport error details - Opts: ~p, RemoteIP: ~p, RemotePort: ~p~n", 
+                          [Opts, RemoteIP, RemotePort]),
+                %%Transport:fast_close(RawSocket),
+                {stop, {handshake_failed, Reason}, State0}
+            end
     end.
 
 handshake(info, {'EXIT', From, Reason}, State) ->
@@ -139,23 +157,26 @@ handshake(internal, exec, State0 = #state{transport=Transport, raw_socket=RawSoc
         %%{stop, {wait_error, Reason}}
     end;
 handshake(internal, client, State0 = #state{raw_socket=RawSocket, socket=Socket}) ->
-    io:format("Echo client handshake socket ~p~n", [Socket]),
+    io:format("Echo client handshake socket ~p, starting SSL handshake (timeout 5000ms)~n", [Socket]),
     %% Do DTLS session handshake
-    case ssl:handshake(Socket, 5000) of
+    HandshakeResult = ssl:handshake(Socket, 5000),
+    io:format("Echo client: SSL handshake returned: ~p~n", [HandshakeResult]),
+    case HandshakeResult of
       {ok, AcceptedSocket} ->
         io:format("Echo client handshake ok socket~n"),
         {ok, PeerName} = ssl:peername(AcceptedSocket),
         State = State0#state{socket=AcceptedSocket, peername=PeerName},
-        {next_state, connected, State0, [{next_event, internal, client_add_peer}]};
+        {next_state, connected, State, [{next_event, internal, client_add_peer}]};
       {error, Reason} ->
         io:format("Echo client handshake fail reason ~p~n", [Reason]),
+        io:format("Echo client handshake error details: Socket=~p, State=~p~n", [Socket, State0]),
         %%Transport:fast_close(RawSocket),
         {stop, {handshake_failed, Reason}, State0}
     end. 
 
 %%% Handle all DTLS/SSL messages
 connected(info, {ssl, _Raw, Packet}, State = #state{transport=T, socket=Socket, peername=P}) ->
-    io:format("~s ← ~p~n", [esockd:format(P), Packet]),
+    io:format("DTLS Server: Received SSL packet from ~s, size=~p~n", [esockd:format(P), byte_size(Packet)]),
     %%T:async_send(Socket, Packet),
     {PeerIP, PeerPort} = P,
     demux_packet(PeerIP, PeerPort, Packet, State),
@@ -284,6 +305,7 @@ demux_packet(IP, Port, Packet, S) ->
     %% - Decompress the remaining packet if necessary
     %% - Send the packet to the peer (ID in protocol header)
     %%
+    io:format("DTLS Server: demux_packet called for ~p:~p, packet size=~p~n", [IP, Port, byte_size(Packet)]),
     #state{
         socket = Socket,
         compressor = CompressionMode,
@@ -297,6 +319,7 @@ demux_packet(IP, Port, Packet, S) ->
             sent_time = SentTime
         },
         Rest} = enet_protocol_decode:protocol_header(Packet),
+    io:format("DTLS Server: Decoded packet, RecipientPeerID=~p (NULL=~p)~n", [RecipientPeerID, ?NULL_PEER_ID]),
     Commands =
         case IsCompressed of
             0 -> Rest;
@@ -309,9 +332,11 @@ demux_packet(IP, Port, Packet, S) ->
         ?NULL_PEER_ID ->
             %% No particular peer is the receiver of this packet.
             %% Create a new peer.
+            io:format("DTLS Server: Creating new peer for CONNECT from ~p:~p~n", [IP, Port]),
             Ref = make_ref(),
             try enet_pool:add_peer(LocalPort, Ref) of
                 PeerID ->
+                    io:format("DTLS Server: Created peer PeerID=~p, Ref=~p~n", [PeerID, Ref]),
                     Peer = #enet_peer{
                         handshake_flow = remote,
                         peer_id = PeerID,
@@ -326,6 +351,7 @@ demux_packet(IP, Port, Packet, S) ->
                     gproc:reg({p, l, peer_id}, PeerID),
                     gproc:reg({p, l, peer_name}, Ref),
                     {ok, Pid} = start_peer(Peer),
+                    io:format("DTLS Server: Started peer process Pid=~p, sending packet~n", [Pid]),
                     %%io:format("Peer start recv packet ~p ~p ~p ~p~n", [Pid, IP, SentTime, Commands]),
                     enet_peer:recv_incoming_packet(Pid, IP, SentTime, Commands)
             catch

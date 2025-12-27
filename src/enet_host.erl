@@ -44,8 +44,8 @@
 %%% API
 %%%===================================================================
 
-start_link(Port, ConnectFun, Options) ->
-    gen_server:start_link(?MODULE, {Port, ConnectFun, Options}, []).
+start_link(HostId, ConnectFun, Options) ->
+    gen_server:start_link(?MODULE, {HostId, ConnectFun, Options}, []).
 
 socket_options() ->
     [binary, {active, false}, {reuseaddr, false}, {broadcast, true}].
@@ -96,9 +96,9 @@ get_channel_limit(Host) ->
 %%% gen_server callbacks
 %%%===================================================================
 
-init({AssignedPort, ConnectFun, Options}) ->
-    true = gproc:reg({n, l, {enet_host, AssignedPort}}),
-    yes = global:register_name({enet_host, AssignedPort}, self()),
+init({HostId, ConnectFun, Options}) ->
+    true = gproc:reg({n, l, {enet_host, HostId}}),
+    yes = global:register_name({enet_host, HostId}, self()),
     %%io:format("Global proc reg ~p~n", Options),
     ChannelLimit =
         case lists:keyfind(channel_limit, 1, Options) of
@@ -124,7 +124,7 @@ init({AssignedPort, ConnectFun, Options}) ->
         p,
         l,
         [
-            {port, AssignedPort},
+            {port, HostId},
             {channel_limit, ChannelLimit},
             {incoming_bandwidth, IncomingBandwidth},
             {outgoing_bandwidth, OutgoingBandwidth},
@@ -162,6 +162,7 @@ handle_call({connect, IP, Port, Channels, Data}, _From, S) ->
                     port = Port,
                     name = Ref,
                     host = self(),
+                    manager_pid = self(),  %% For UDP mode, manager_pid is the enet_host process
                     channels = Channels,
                     connect_fun = ConnectFun,
                     connect_packet_data = Data
@@ -183,34 +184,81 @@ handle_call({send_outgoing_commands, C, IP, Port, ID}, _From, S) ->
     %% - Return sent time
     %%
     #state{
-        compressor = CompressionMode
+        compressor = CompressionMode,
+        socket = Socket
     } = S,
-    {Compressed, Commands} = 
-        case CompressionMode of
-            none -> 
-                {0, C}; % uncompressed
-            Compressor ->
-                {1, compress(C, Compressor)}
-        end,
-    SentTime = get_time(),
-    PH = #protocol_header{
-        compressed = Compressed,
-        peer_id = ID,
-        sent_time = SentTime
-    },
-    Packet = [enet_protocol_encode:protocol_header(PH), Commands],
-    ok = gen_udp:send(S#state.socket, IP, Port, Packet),
-    {reply, {sent_time, SentTime}, S}.
+    case Socket of
+        undefined ->
+            io:format("ENet Host: Cannot send - socket is undefined (DTLS mode?)~n"),
+            {reply, {error, no_socket}, S};
+        _ ->
+            {Compressed, Commands} = 
+                case CompressionMode of
+                    none -> 
+                        {0, C}; % uncompressed
+                    Compressor ->
+                        {1, compress(C, Compressor)}
+                end,
+            SentTime = get_time(),
+            PH = #protocol_header{
+                compressed = Compressed,
+                peer_id = ID,
+                sent_time = SentTime
+            },
+            Packet = [enet_protocol_encode:protocol_header(PH), Commands],
+            io:format("ENet Host: Sending UDP packet to ~p:~p, size=~p~n", [IP, Port, iolist_size(Packet)]),
+            %% Convert IP string/binary to tuple if needed (gen_udp:send requires tuple format)
+            IPAddr = case IP of
+                IPBin when is_binary(IPBin) ->
+                    IPStr = binary_to_list(IPBin),
+                    case inet:parse_address(IPStr) of
+                        {ok, Addr} -> Addr;
+                        _ -> 
+                            %% Fallback: parse "127.0.0.1" format manually
+                            Parts = string:tokens(IPStr, "."),
+                            PartsInt = [list_to_integer(P) || P <- Parts],
+                            list_to_tuple(PartsInt)
+                    end;
+                IPStr when is_list(IPStr) ->
+                    case inet:parse_address(IPStr) of
+                        {ok, Addr} -> Addr;
+                        _ -> 
+                            %% Fallback: parse "127.0.0.1" format manually
+                            Parts = string:tokens(IPStr, "."),
+                            PartsInt = [list_to_integer(P) || P <- Parts],
+                            list_to_tuple(PartsInt)
+                    end;
+                IPTup when is_tuple(IPTup) -> IPTup;
+                _ -> IP
+            end,
+            ok = gen_udp:send(Socket, IPAddr, Port, Packet),
+            {reply, {sent_time, SentTime}, S}
+    end.
 
 %%%
 %%% handle_cast
 %%%
 
 handle_cast({give_socket, Socket, Transport}, S) ->
-    ok = Transport:setopts(Socket, [{active, true}]),
-    {ok, PeerName} = Transport:peername(Socket),
+    %% For UDP (gen_udp), use inet:setopts; for DTLS (ssl), use ssl:setopts
+    case Transport of
+        gen_udp ->
+            ok = inet:setopts(Socket, [{active, true}]);
+        ssl ->
+            ok = ssl:setopts(Socket, [{active, true}]);
+        _ ->
+            ok = Transport:setopts(Socket, [{active, true}])
+    end,
+    %% For UDP, peername is not available until a packet is received
+    %% For DTLS, peername is available after handshake
+    PeerName = case Transport of
+        gen_udp -> undefined;  %% UDP clients don't have peername until they receive
+        _ -> case Transport:peername(Socket) of
+            {ok, PN} -> PN;
+            _ -> undefined
+        end
+    end,
     io:format("Process transferred 2"),
-    %%ok = inet:setopts(Socket, [{active, true}]),
     {noreply, S#state{socket = Socket, transport = Transport, peername = PeerName}};
 handle_cast(_Msg, State) ->
     {noreply, State}.
@@ -323,6 +371,7 @@ demux_packet(Socket, IP, Port, Packet, S) ->
                         port = Port,
                         name = Ref,
                         host = self(),
+                        manager_pid = self(),  %% For UDP mode, manager_pid is the enet_host process
                         connect_fun = ConnectFun
                     },
                     {ok, Pid} = start_peer(Peer),
@@ -347,8 +396,8 @@ get_time() ->
     erlang:system_time(1000) band 16#FFFF.
 
 start_peer(Peer = #enet_peer{name = Ref}) ->
-    LocalPort = gproc:get_value({p, l, port}, self()),
-    PeerSup = gproc:where({n, l, {enet_peer_sup, LocalPort}}),
+    HostId = gproc:get_value({p, l, port}, self()),
+    PeerSup = gproc:where({n, l, {enet_peer_sup, HostId}}),
     {ok, Pid} = enet_peer_sup:start_peer(PeerSup, Peer),
     _Ref = gproc:monitor({n, l, {enet_peer, Ref}}),
     {ok, Pid}.

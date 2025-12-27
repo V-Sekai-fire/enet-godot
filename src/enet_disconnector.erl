@@ -25,24 +25,24 @@
 %%% API
 %%%===================================================================
 
-start_link(LocalPort) ->
-    gen_server:start_link(?MODULE, [LocalPort], []).
+start_link(HostId) ->
+    gen_server:start_link(?MODULE, [HostId], []).
 
-set_trigger(LocalPort, PeerID, IP, Port) ->
-    Server = gproc:where({n, l, {enet_disconnector, LocalPort}}),
+set_trigger(HostId, PeerID, IP, Port) ->
+    Server = gproc:where({n, l, {enet_disconnector, HostId}}),
     gen_server:cast(Server, {set_trigger, self(), PeerID, IP, Port}).
 
-unset_trigger(LocalPort, PeerID, IP, Port) ->
-    Server = gproc:where({n, l, {enet_disconnector, LocalPort}}),
+unset_trigger(HostId, PeerID, IP, Port) ->
+    Server = gproc:where({n, l, {enet_disconnector, HostId}}),
     gen_server:call(Server, {unset_trigger, PeerID, IP, Port}).
 
 %%%===================================================================
 %%% gen_server callbacks
 %%%===================================================================
 
-init([LocalPort]) ->
-    true = gproc:reg({n, l, {enet_disconnector, LocalPort}}),
-    {ok, #state{port = LocalPort}}.
+init([HostId]) ->
+    true = gproc:reg({n, l, {enet_disconnector, HostId}}),
+    {ok, #state{port = HostId}}.
 
 handle_call({unset_trigger, PeerID, IP, Port}, {PeerPid, _}, S) ->
     Key = {n, l, {PeerID, IP, Port}},
@@ -59,12 +59,12 @@ handle_cast({set_trigger, PeerPid, PeerID, IP, Port}, State) ->
     {noreply, State}.
 
 handle_info({gproc, unreg, _Ref, {n, l, {PeerID, IP, Port}}}, S) ->
-    #state{port = LocalPort} = S,
+    #state{port = HostId} = S,
     {CH, Command} = enet_command:unsequenced_disconnect(),
     HBin = enet_protocol_encode:command_header(CH),
     CBin = enet_protocol_encode:command(Command),
     Data = [HBin, CBin],
-    Host = gproc:where({n, l, {enet_host, LocalPort}}),
+    Host = gproc:where({n, l, {enet_host, HostId}}),
     enet_host:send_outgoing_commands(Host, Data, IP, Port, PeerID),
     {noreply, S}.
 

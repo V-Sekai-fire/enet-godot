@@ -41,7 +41,7 @@ start_host(Port, ConnectFun, Options) ->
             {error, Reason};
         {ok, _HostSup} ->
             Host = gproc:where({n, l, {enet_host, AssignedPort}}),
-            %%enet_host:give_socket(Host, Socket),
+            enet_host:give_socket(Host, Socket, gen_udp),
             {ok, AssignedPort}
     end.
 

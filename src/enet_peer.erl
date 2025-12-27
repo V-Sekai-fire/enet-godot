@@ -119,8 +119,8 @@
 %%% API
 %%%===================================================================
 
-start_link(LocalPort, Peer) ->
-    gen_statem:start_link(?MODULE, [LocalPort, Peer], []).
+start_link(HostId, Peer) ->
+    gen_statem:start_link(?MODULE, [HostId, Peer], []).
 
 disconnect(Peer) ->
     gen_statem:cast(Peer, disconnect).
@@ -284,8 +284,10 @@ connecting(enter, _OldState, S) ->
     HBin = enet_protocol_encode:command_header(ConnectH),
     CBin = enet_protocol_encode:command(ConnectC),
     Data = [HBin, CBin],
+    io:format("ENet Peer: Sending CONNECT command to ~p:~p via ManagerPid ~p~n", [IP, Port, ManagerPid]),
     {sent_time, SentTime} =
-        enet_host:send_outgoing_commands(ManagerPid, Data, IP, Port),
+        send_outgoing_commands(ManagerPid, Data, IP, Port),
+    io:format("ENet Peer: CONNECT command sent, SentTime=~p~n", [SentTime]),
     ChannelID = 16#FF,
     ConnectTimeout =
         make_resend_timer(
@@ -388,7 +390,7 @@ acknowledging_connect(cast, {incoming_command, {_H, C = #connect{}}}, S) ->
     CBin = enet_protocol_encode:command(VCC),
     Data = [HBin, CBin],
     {sent_time, SentTime} =
-        enet_host:send_outgoing_commands(ManagerPid, Data, IP, Port, RemotePeerID),
+        send_outgoing_commands(ManagerPid, Data, IP, Port, RemotePeerID),
     ChannelID = 16#FF,
     VerifyConnectTimeout =
         make_resend_timer(
@@ -699,7 +701,7 @@ connected(cast, {outgoing_command, {H, C = #unsequenced{}}}, S) ->
     CBin = enet_protocol_encode:command(C1),
     Data = [HBin, CBin],
     {sent_time, _SentTime} =
-        enet_host:send_outgoing_commands(ManagerPid, Data, IP, Port, RemotePeerID),
+        send_outgoing_commands(ManagerPid, Data, IP, Port, RemotePeerID),
     NewS = S#state{outgoing_unsequenced_group = Group + 1},
     SendTimeout = reset_send_timer(),
     {keep_state, NewS, [SendTimeout]};
@@ -722,7 +724,7 @@ connected(cast, {outgoing_command, {H, C = #unreliable{}}}, S) ->
     CBin = enet_protocol_encode:command(C),
     Data = [HBin, CBin],
     {sent_time, _SentTime} =
-        enet_host:send_outgoing_commands(ManagerPid, Data, IP, Port, RemotePeerID),
+        send_outgoing_commands(ManagerPid, Data, IP, Port, RemotePeerID),
     SendTimeout = reset_send_timer(),
     {keep_state, S, [SendTimeout]};
 connected(cast, {outgoing_command, {H, C = #reliable{}}}, S) ->
@@ -748,13 +750,21 @@ connected(cast, {outgoing_command, {H, C = #reliable{}}}, S) ->
     CBin = enet_protocol_encode:command(C),
     Data = [HBin, CBin],
     {sent_time, SentTime} =
-        enet_host:send_outgoing_commands(ManagerPid, Data, IP, Port, RemotePeerID),
+        send_outgoing_commands(ManagerPid, Data, IP, Port, RemotePeerID),
     SendReliableTimeout =
         make_resend_timer(
             ChannelID, SentTime, SequenceNr, ?PEER_TIMEOUT_MINIMUM, Data
         ),
     SendTimeout = reset_send_timer(),
     {keep_state, S, [SendReliableTimeout, SendTimeout]};
+connected(info, {enet, ChannelID, C}, S) ->
+    %%
+    %% Received a message that should be forwarded to the worker.
+    %% This can happen if messages are sent to the peer instead of the worker.
+    %%
+    #state{worker = Worker} = S,
+    Worker ! {enet, ChannelID, C},
+    {keep_state, S};
 connected(cast, disconnect, State) ->
     %%
     %% Disconnecting.
@@ -774,7 +784,7 @@ connected(cast, disconnect, State) ->
     HBin = enet_protocol_encode:command_header(H),
     CBin = enet_protocol_encode:command(C),
     Data = [HBin, CBin],
-    enet_host:send_outgoing_commands(ManagerPid, Data, IP, Port, RemotePeerID),
+    send_outgoing_commands(ManagerPid, Data, IP, Port, RemotePeerID),
     {next_state, disconnecting, State};
 connected(cast, disconnect_now, State) ->
     %%
@@ -800,7 +810,7 @@ connected({timeout, {ChannelID, SentTime, SequenceNr}}, Data, S) ->
         port = Port,
         remote_peer_id = RemotePeerID
     } = S,
-    enet_host:send_outgoing_commands(ManagerPid, Data, IP, Port, RemotePeerID),
+    send_outgoing_commands(ManagerPid, Data, IP, Port, RemotePeerID),
     NewTimeout =
         make_resend_timer(
             ChannelID, SentTime, SequenceNr, ?PEER_TIMEOUT_MINIMUM, Data
@@ -841,9 +851,17 @@ connected({timeout, send}, ping, S) ->
     CBin = enet_protocol_encode:command(C),
     Data = [HBin, CBin],
     {sent_time, _SentTime} =
-        enet_host:send_outgoing_commands(ManagerPid, Data, IP, Port, RemotePeerID),
+        send_outgoing_commands(ManagerPid, Data, IP, Port, RemotePeerID),
     SendTimeout = reset_send_timer(),
     {keep_state, S, [SendTimeout]};
+connected(info, {enet, ChannelID, C}, S) ->
+    %%
+    %% Received a message that should be forwarded to the worker.
+    %% This can happen if messages are sent to the peer instead of the worker.
+    %%
+    #state{worker = Worker} = S,
+    Worker ! {enet, ChannelID, C},
+    {keep_state, S};
 connected(EventType, EventContent, S) ->
     handle_event(EventType, EventContent, S).
 
@@ -934,7 +952,7 @@ handle_event(cast, {incoming_packet, FromIP, SentTime, Packet}, S) ->
                         _ -> S#state.remote_peer_id
                     end,
                 {sent_time, _AckSentTime} =
-                    enet_host:send_outgoing_commands(
+                    send_outgoing_commands(
                         ManagerPid, [HBin, CBin], FromIP, Port, RemotePeerID
                     ),
                 gen_statem:cast(self(), {incoming_command, {H, C}})
@@ -972,6 +990,35 @@ make_resend_timer(ChannelID, SentTime, SequenceNumber, Time, Data) ->
 
 cancel_resend_timer(ChannelID, SentTime, SequenceNumber) ->
     {{timeout, {ChannelID, SentTime, SequenceNumber}}, cancel}.
+
+%%%===================================================================
+%%% Send routing helper - routes to enet_host (UDP) or dtls_echo_server (DTLS)
+%%%===================================================================
+
+send_outgoing_commands(ManagerPid, Data, IP, Port) ->
+    send_outgoing_commands(ManagerPid, Data, IP, Port, ?MAX_PEER_ID).
+
+send_outgoing_commands(ManagerPid, Data, IP, Port, PeerID) ->
+    %% Try to determine if ManagerPid is dtls_echo_server (gen_statem) or enet_host (gen_server)
+    %% dtls_echo_server uses gen_statem:call, enet_host uses gen_server:call
+    %% We can detect by checking if the process responds to gen_statem:call
+    %% For DTLS, ManagerPid is dtls_echo_server; for UDP, it's enet_host
+    try
+        %% Try gen_statem:call first (DTLS echo server)
+        gen_statem:call(ManagerPid, {send_outgoing_commands, Data, IP, Port, PeerID}, 5000)
+    catch
+        exit:{noproc, _} ->
+            %% Process doesn't exist or isn't a gen_statem, try gen_server:call (enet_host)
+            gen_server:call(ManagerPid, {send_outgoing_commands, Data, IP, Port, PeerID}, 5000);
+        exit:{timeout, _} ->
+            %% Timeout on gen_statem, try gen_server
+            gen_server:call(ManagerPid, {send_outgoing_commands, Data, IP, Port, PeerID}, 5000);
+        Class:Reason ->
+            %% Other error - log and try gen_server as fallback
+            logger:error("gen_statem:call failed for ManagerPid ~p: ~p:~p, trying gen_server", 
+                        [ManagerPid, Class, Reason]),
+            gen_server:call(ManagerPid, {send_outgoing_commands, Data, IP, Port, PeerID}, 5000)
+    end.
 
 reset_recv_timer() ->
     {{timeout, recv}, 2 * ?PEER_PING_INTERVAL, ping}.

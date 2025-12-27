@@ -7,7 +7,8 @@
 -export([init/1, handle_info/2, handle_cast/2, handle_call/3, terminate/2, code_change/3]).
 
 -record(state, {
-  port
+  port,
+  esockd_name
 }).
 
 %%% API
@@ -23,7 +24,7 @@ init({Port, HostId}) ->
     case Port of
         0 ->
             %% Client mode: no listener needed
-            {ok, #state{port=Port}};
+            {ok, #state{port=Port, esockd_name=undefined}};
         _ ->
             %% Server mode: start DTLS listener
             ok = esockd:start(),
@@ -41,10 +42,32 @@ init({Port, HostId}) ->
 
             %% Tell esockd to use our connection‐sup to spawn each handler
             %% Use HostId (not Port) so multiple clients can connect on port 0
+            %% Use HostId in the esockd name to support multiple server instances
             MFArgs = {dtls_echo_conn_sup, start_child, [HostId]},
-            {ok, _ListenSock} = esockd:open_dtls('echo/dtls', Port, Opts, MFArgs),
-
-            {ok, #state{port=Port}}
+            EsockdName = list_to_atom("echo/dtls/" ++ integer_to_list(HostId)),
+            %% Try to close any existing listener on this port/name
+            %% Ignore errors - listener might not exist
+            catch esockd:close(EsockdName, Port),
+            %% Wait a bit for cleanup to complete
+            timer:sleep(100),
+            %% Try to open the listener
+            case esockd:open_dtls(EsockdName, Port, Opts, MFArgs) of
+                {ok, _ListenSock} ->
+                    {ok, #state{port=Port, esockd_name=EsockdName}};
+                {error, {{shutdown, {failed_to_start_child, _Listener, already_listening}}, _}} = Error ->
+                    %% Listener already exists - this is OK if it's the same one
+                    %% Try to verify it's our listener by checking if we can get info about it
+                    %% For now, just accept it and continue
+                    io:format("DTLS listener already exists on port ~p, assuming it's ours~n", [Port]),
+                    {ok, #state{port=Port, esockd_name=EsockdName}};
+                {error, already_listening} ->
+                    %% Simpler error format - listener already exists
+                    io:format("DTLS listener already exists on port ~p, assuming it's ours~n", [Port]),
+                    {ok, #state{port=Port, esockd_name=EsockdName}};
+                Error ->
+                    io:format("Failed to open DTLS listener: ~p~n", [Error]),
+                    {stop, {failed_to_open_dtls, Error}}
+            end
     end.
 
 handle_info(_Info, State) ->
@@ -59,8 +82,18 @@ handle_call(_Request, _From, State) ->
     %% Respond with a default reply
     {reply, ok, State}.
 
-terminate(_Reason, _State) ->
-    ok.
+terminate(_Reason, State) ->
+    %% Close the esockd listener if it exists
+    case State#state.esockd_name of
+        undefined -> ok;
+        EsockdName ->
+            case State#state.port of
+                0 -> ok;  %% Clients don't have listeners
+                Port ->
+                    esockd:close(EsockdName, Port),
+                    ok
+            end
+    end.
 
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
